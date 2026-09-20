@@ -7,30 +7,10 @@ Disable with SKILL_PICKER_RERANK=0.
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import replace
 from typing import Any
 
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
-# Single-token skill names that often collide with English words in tasks
-_NAME_COLLISIONS = frozenset(
-    {
-        "coverage",
-        "test",
-        "tests",
-        "review",
-        "run",
-        "status",
-        "init",
-        "plan",
-        "guide",
-        "extract",
-        "search",
-        "build",
-        "deploy",
-        "debug",
-    }
-)
 _reranker = None
 
 
@@ -52,15 +32,6 @@ def _doc_text(hit: Any) -> str:
     return f"{hit.name}\n[{hit.primary}]\n{hit.description}\n{body}"
 
 
-def _collision_penalty(query: str, hit: Any) -> float:
-    """Demote skills whose name is a common English word appearing in the query."""
-    name = str(hit.name).lower().strip()
-    if name not in _NAME_COLLISIONS:
-        return 0.0
-    tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
-    return 3.0 if name in tokens else 0.0
-
-
 def rerank(query: str, hits: list[Any], *, top_k: int) -> list[Any]:
     """Rerank hits by cross-encoder score (higher = more relevant). Returns top_k."""
     if not hits or not rerank_enabled() or not query.strip():
@@ -68,17 +39,14 @@ def rerank(query: str, hits: list[Any], *, top_k: int) -> list[Any]:
     candidates = hits[: max(top_k * 3, 15)]
     try:
         model = _get_reranker()
-        raw = model.predict([(query, _doc_text(h)) for h in candidates])
-        scores = [
-            float(s) - _collision_penalty(query, h)
-            for h, s in zip(candidates, raw, strict=True)
-        ]
+        pairs = [(query, _doc_text(h)) for h in candidates]
+        scores = model.predict(pairs)
     except Exception:
         return hits[:top_k]
 
     ranked = sorted(
         zip(candidates, scores, strict=True),
-        key=lambda x: x[1],
+        key=lambda x: float(x[1]),
         reverse=True,
     )
     return [replace(h, score=-float(sc)) for h, sc in ranked[:top_k]]
