@@ -39,7 +39,7 @@ def find_helpful_skills(
     top_k: int = 5,
     mode: str = "hybrid",
 ) -> str:
-    """Search Cursor Agent Skills for a task (FTS5 + sqlite-vec hybrid).
+    """Search Cursor Agent Skills (intent → FTS5 + sqlite-vec → cross-encoder).
 
     Call FIRST when unsure which of ~700 skills to load. Then Read skill_md_path.
 
@@ -49,11 +49,17 @@ def find_helpful_skills(
         top_k: How many results (1–25).
         mode: hybrid (default) | fts | vec
     """
-    hits = index.search(task, category=category, top_k=top_k, mode=mode)
+    from .intent import parse_intent
+
+    intent = parse_intent(task)
+    _intent, hits = index.search_with_intent(
+        intent, category=category, top_k=top_k, mode=mode
+    )
     if not hits:
         return json.dumps(
             {
                 "task": task,
+                "intent": intent.as_dict(),
                 "category": category,
                 "mode": mode,
                 "results": [],
@@ -64,8 +70,9 @@ def find_helpful_skills(
     return json.dumps(
         {
             "task": task,
+            "intent": intent.as_dict(),
             "category": category,
-            "mode": mode,
+            "mode": f"{mode}+intent+rerank" if mode == "hybrid" else mode,
             "results": [_hit_dict(h) for h in hits],
             "next": "Read skill_md_path for the top result and follow that skill.",
         },
