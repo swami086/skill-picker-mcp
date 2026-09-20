@@ -1,0 +1,36 @@
+# Optional helpers — Cursor uses `docker run -i` directly (see README).
+services:
+  skill-picker:
+    image: skill-picker-mcp:0.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      tags:
+        - skill-picker-mcp:0.1.0
+        - skill-picker-mcp:latest
+    # Interactive stdio — not a long-running daemon.
+    stdin_open: true
+    tty: false
+    volumes:
+      - ${SKILL_PICKER_HOST_SKILLS:-${HOME}/.cursor/skills}:/skills:ro
+      - skill-picker-data:/data
+    environment:
+      SKILL_PICKER_HOST_PREFIX: ${SKILL_PICKER_HOST_PREFIX:-${HOME}/.cursor/skills}
+
+  # One-shot: docker compose run --rm reindex
+  reindex:
+    image: skill-picker-mcp:0.1.0
+    profiles: ["tools"]
+    volumes:
+      - ${SKILL_PICKER_HOST_SKILLS:-${HOME}/.cursor/skills}:/skills:ro
+      - skill-picker-data:/data
+    environment:
+      SKILL_PICKER_HOST_PREFIX: ${SKILL_PICKER_HOST_PREFIX:-${HOME}/.cursor/skills}
+    entrypoint: ["python", "-c"]
+    command:
+      - |
+        from skill_picker_mcp.index import reindex
+        print(reindex())
+
+volumes:
+  skill-picker-data:
