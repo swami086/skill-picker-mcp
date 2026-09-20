@@ -27,16 +27,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
  && uv sync --frozen --no-dev --no-editable \
  && /opt/venv/bin/python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
 
-# Bake MiniLM + cross-encoder so first query does not hit the network.
+# Bake MiniLM so first query does not hit the network.
 ENV HF_HOME=/opt/hf \
     TRANSFORMERS_CACHE=/opt/hf \
-    SENTENCE_TRANSFORMERS_HOME=/opt/hf \
-    HF_HUB_OFFLINE=0
+    SENTENCE_TRANSFORMERS_HOME=/opt/hf
 RUN /opt/venv/bin/python -c "\
-from sentence_transformers import SentenceTransformer, CrossEncoder; \
+from sentence_transformers import SentenceTransformer; \
 SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2'); \
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2'); \
-print('models ok')"
+print('model ok')"
 
 # ── runtime ──────────────────────────────────────────────────────────
 FROM python:3.12-slim-bookworm

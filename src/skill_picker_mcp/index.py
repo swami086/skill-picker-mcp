@@ -16,8 +16,6 @@ from pathlib import Path
 from sqlite_vec import serialize_float32
 
 from .embed import EMBED_DIM, EMBED_MODEL, embed_query, embed_texts
-from .intent import Intent, parse_intent
-from .rerank import rerank as cross_encoder_rerank
 
 
 def _env_path(key: str, default: Path) -> Path:
@@ -529,48 +527,21 @@ def search(
     top_k: int = 5,
     db_path: Path = DEFAULT_DB,
     mode: str = "hybrid",
-    rerank: bool = True,
 ) -> list[SkillHit]:
-    """Search skills. mode: hybrid | fts | vec. Intent rewrite + optional cross-encoder."""
-    intent = parse_intent(task)
-    return search_with_intent(
-        intent,
-        category=category,
-        top_k=top_k,
-        db_path=db_path,
-        mode=mode,
-        rerank=rerank,
-    )[1]
-
-
-def search_with_intent(
-    intent: Intent,
-    *,
-    category: str | None = None,
-    top_k: int = 5,
-    db_path: Path = DEFAULT_DB,
-    mode: str = "hybrid",
-    rerank: bool = True,
-) -> tuple[Intent, list[SkillHit]]:
-    """Full pipeline: intent → FTS/vec on rewrite → RRF → cue boost → cross-encoder."""
+    """Search skills. mode: hybrid | fts | vec."""
     ensure_index(db_path=db_path)
-    # Soft category: user override wins; else leave open (multi-domain tasks)
-    cat = category
-    query = intent.rewrite or intent.original
-    original = intent.original or query
     conn = _connect(db_path)
-    fetch_k = max(top_k * 5, 25) if not cat else max(top_k * 3, 15)
+    fetch_k = max(top_k * 5, 25) if not category else max(top_k * 3, 15)
     fetch_k = max(1, min(int(fetch_k), 80))
     try:
         fts_hits: list[SkillHit] = []
         vec_hits: list[SkillHit] = []
         if mode in {"hybrid", "fts"}:
-            # Elastic: original must + enrich should → FTS OR of both token sets
-            fts_hits = _fts_search(conn, query, category=cat, limit=fetch_k)
+            fts_hits = _fts_search(conn, task, category=category, limit=fetch_k)
         if mode in {"hybrid", "vec"}:
             try:
                 if has_vectors(conn):
-                    vec_hits = _vec_search(conn, query, category=cat, limit=fetch_k)
+                    vec_hits = _vec_search(conn, task, category=category, limit=fetch_k)
                 else:
                     vec_hits = []
             except Exception:
@@ -583,31 +554,7 @@ def search_with_intent(
             hits = _rrf_fuse([fts_hits, vec_hits])
     finally:
         conn.close()
-
-    # Prefer intent categories in cue boost (merge with regex cues on original)
-    hits = _boost_by_task_cues(original, hits)
-    if intent.categories:
-        hits = _boost_intent_categories(intent.categories, hits)
-
-    limit = max(1, min(int(top_k), 25))
-    if rerank and mode == "hybrid":
-        hits = cross_encoder_rerank(original, hits, top_k=limit)
-    else:
-        hits = hits[:limit]
-    return intent, hits
-
-
-def _boost_intent_categories(categories: list[str], hits: list[SkillHit]) -> list[SkillHit]:
-    if not categories or not hits:
-        return hits
-    boosted: list[SkillHit] = []
-    for h in hits:
-        score = h.score
-        if h.primary in categories:
-            score -= 0.06 * (1 + categories.index(h.primary) * 0.12)
-        boosted.append(SkillHit(h.name, h.path, h.primary, h.description, score, h.skill_md))
-    boosted.sort(key=lambda x: x.score)
-    return boosted
+    return _boost_by_task_cues(task, hits)[: max(1, min(int(top_k), 25))]
 
 
 def get_skill(name: str, db_path: Path = DEFAULT_DB) -> SkillHit | None:
@@ -673,20 +620,18 @@ def compose(
     top_k: int = 5,
     db_path: Path = DEFAULT_DB,
 ) -> dict:
-    """Primary + supporting skills across distinct categories (intent-aware)."""
-    intent, hits = search_with_intent(
-        parse_intent(task),
-        top_k=max(top_k * 6, 24),
-        db_path=db_path,
-        mode="hybrid",
-        rerank=True,
-    )
+    """Primary + supporting skills across distinct categories."""
+    hits = search(task, top_k=max(top_k * 6, 24), db_path=db_path)
     if not hits:
-        return {"primary": None, "supporting": [], "task": task, "intent": intent.as_dict()}
-    preferred = intent.categories or [cat for rx, cat in _CUE_CATS if rx.search(task)]
-    preferred_set = set(preferred)
-    # Global rerank order, first hit whose category is an intent domain
-    primary = next((h for h in hits if h.primary in preferred_set), hits[0]) if preferred_set else hits[0]
+        return {"primary": None, "supporting": [], "task": task}
+    preferred = [cat for rx, cat in _CUE_CATS if rx.search(task)]
+    primary = hits[0]
+    if preferred and primary.primary not in preferred:
+        for cat in preferred:
+            cand = next((h for h in hits if h.primary == cat), None)
+            if cand:
+                primary = cand
+                break
 
     supporting: list[SkillHit] = []
     seen_cats = {primary.primary}
@@ -735,10 +680,9 @@ def compose(
 
     return {
         "task": task,
-        "intent": intent.as_dict(),
         "primary": pack(primary),
         "supporting": [pack(s) for s in supporting],
-        "mode": "intent+fts5+sqlite-vec+rrf+rerank",
+        "mode": "fts5+sqlite-vec+rrf",
         "instruction": (
             "Read primary SKILL.md first and follow it. "
             "Load supporting skills only if the primary skill requires them or the task clearly spans those domains."
