@@ -55,17 +55,10 @@ def _doc_text(hit: Any) -> str:
 def _collision_penalty(query: str, hit: Any) -> float:
     """Demote skills whose name is a common English word appearing in the query."""
     name = str(hit.name).lower().strip()
-    pen = 0.0
-    if name in _NAME_COLLISIONS:
-        tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
-        if name in tokens:
-            pen += 3.0
-    blob = f"{hit.name} {hit.description}"
-    if re.search(r"\b(react|next\.?js)\b", query, re.I) and re.search(
-        r"webflow|wordpress|shopify", blob, re.I
-    ):
-        pen += 5.0
-    return pen
+    if name not in _NAME_COLLISIONS:
+        return 0.0
+    tokens = set(re.findall(r"[a-z0-9]+", query.lower()))
+    return 3.0 if name in tokens else 0.0
 
 
 def rerank(query: str, hits: list[Any], *, top_k: int) -> list[Any]:
