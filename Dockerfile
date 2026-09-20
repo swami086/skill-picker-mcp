@@ -21,12 +21,10 @@ ENV UV_COMPILE_BYTECODE=1 \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH"
 
-# Skip torch during sync (lock may resolve CUDA wheels), then install CPU torch only.
+# CPU torch via [tool.uv.sources] pytorch-cpu index (see pyproject.toml).
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /opt/venv \
- && uv sync --frozen --no-dev --no-editable --no-install-package torch \
- && uv pip install --python /opt/venv/bin/python \
-      torch --index-url https://download.pytorch.org/whl/cpu \
+ && uv sync --frozen --no-dev --no-editable \
  && /opt/venv/bin/python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
 
 # Bake MiniLM so first query does not hit the network.

@@ -9,6 +9,7 @@ dependencies = [
   "pyyaml>=6.0",
   "sentence-transformers>=6.1.0",
   "sqlite-vec>=0.1.9",
+  "torch>=2.2.0",
 ]
 
 [project.scripts]
@@ -23,3 +24,13 @@ packages = ["src/skill_picker_mcp"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src/skill_picker_mcp" = "skill_picker_mcp"
+
+# CPU-only torch for portable Docker / no NVIDIA wheels
+# https://docs.astral.sh/uv/guides/integration/pytorch/
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
